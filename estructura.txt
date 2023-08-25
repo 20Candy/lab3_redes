@@ -1,1 +1,1 @@
-{'A': 'alfa@alumchat.xyz', 'B': 'beta@alumchat.xyz', 'C': 'charlie@alumchat.xyz'}
+{"A": "alfa@alumchat.xyz", "B": "beta@alumchat.xyz", "C": "charlie@alumchat.xyz"}

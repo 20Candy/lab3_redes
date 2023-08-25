@@ -28,6 +28,3 @@ if result_dict:
     print(result_dict)
 else:
     print("Invalid input format")
-
-
-    
