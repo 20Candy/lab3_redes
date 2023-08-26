@@ -59,26 +59,98 @@ class Dijkstra():
         else:
             topologia = self.topologia[self.graph]
             # array de len(keys) por len(keys)
-            array_topologia = [[-1 for i in range(len(self.keys))] for j in range(len(self.keys))]
+            array_topologia = [[[-1,"-"] for i in range(len(self.keys)-1)] for j in range(len(self.keys))]
+
+            topologia = self.topologia[self.graph]
             for key, value in topologia.items():
-                x = self.keys.index(self.graph)
-                y = self.keys.index(key)
-                array_topologia[x][y] = value
-                array_topologia[x][x] = 0
+                array_topologia[0][self.keys.index(key)-1] = [value, self.graph]
 
             string_array = str(array_topologia)
             
             tabla = {"type":"info", 
                      "headers": {"from": f"{self.graph}", "to": f"{self.graph}", "hop_count": 1},
                      "payload": string_array}
-            
-            print("\n---Tabla Inicial (Type: Topology)---")
-            json_output = json.dumps(tabla)
-            print(json_output)
 
         tabla_updated = self.dijkstra(tabla)
 
-    def dijkstra(self, tabla):
-        print("\n---Tabla Final---")
+        print("\nEl nodo ya conoce la ruta más corta a todos los nodos vecinos.")
+
+        while True:
+            mensaje = input("\n¿Desea enviar/recibir un mensaje? (y/n): ")
+            if mensaje == "n":
+                print("Saliendo...")
+                break
+
+
+
+    def dijkstra(self, info):
+        origin = info["headers"]["from"]
+        destino = info["headers"]["to"]
+
+        tabla = json.loads(info["payload"].replace("'", '"'))
+        tabla_actualizada = tabla[self.keys.index(self.graph)]
+
+        visited = self.visited_already(tabla)
+
+        if len(visited) == len(self.keys) - 1:
+            self.next_visit = self.graph
+            self.before_visit = origin
+
+
+        if origin != destino:
+            tabla_origen = tabla[self.keys.index(origin)]
+
+            topologia = self.topologia[self.graph]
+            for key, value in topologia.items():
+
+                valor_original = tabla_origen[self.keys.index(key)-1][0]
+                x = self.keys.index(self.graph) -1
+                y = self.keys.index(key) - 1
+            
+                if key == self.keys[0]:
+                    continue
+
+                if valor_original > tabla_origen[x][0] + value and value != 0:
+                    tabla[x+1][y] = [tabla_origen[x][0] + value, self.graph]
+                else:
+                    tabla[x+1][y] = tabla_origen[y]
+
+            tabla_actualizada = tabla[self.keys.index(self.graph)-1]
+
+        valores = []
+        for llave, i in enumerate(tabla_actualizada):
+            if i[0] <= 0:
+                valores.append(999)
+            elif i[1] in visited and self.keys[llave+1] in visited:
+                valores.append(999)
+            else:
+                valores.append(i[0])
+
+        minimo = min(valores)
+        indice = valores.index(minimo) + 1
+
+        string_array = str(tabla)
+        tabla_final = {"type":"info", "headers": {"from": f"{self.graph}", "to": f"{self.keys[indice]}", "hop_count": 1},"payload": string_array}
+        
+        tabla_json = json.dumps(tabla_final)
+        print(f"\nTabla actualizada:\n {tabla_json}")
+        
+        self.next_visit = self.keys[indice]
+        self.before_visit = origin
+        return tabla_final
+    
+    def visited_already(self, tabla):
+        visited = []
+        string_tabla = str(tabla)
+
+        tabla = string_tabla.replace("'", '').replace('[', '').replace(']', '').replace('"', '')
+
+        for i in tabla:
+            if i.isalpha():
+                visited.append(i)
+
+        unique_visited = list(set(visited))
+
+        return unique_visited
 
 main = Dijkstra()
