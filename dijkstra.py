@@ -4,7 +4,7 @@ class Dijkstra():
 
     def convert_to_dict(self):
         try:
-            input_str = input("Ingrese su paquete JSON: ")
+            input_str = input("\nIngrese su paquete JSON: ")
             data = json.loads(input_str)
             return data
         except json.JSONDecodeError as err:
@@ -38,6 +38,7 @@ class Dijkstra():
                 print("Ingrese un número válido")
 
     def __init__(self):
+        self.done = False
         self.graph = self.select_node()
         self.tabla = self.tabla_enrutamiento()
         self.main()
@@ -64,30 +65,9 @@ class Dijkstra():
         tabla = {}
         # Si el nodo seleccionado es el primero, se crea el primer paquete de información
         if self.graph == self.keys[0]:
-
-            # Le manda a todos los vecinos un echo
-            for key, value in self.topologia[self.graph].items():
-                if key != self.graph and value != 0:
-                    print("\n---------------------------")
-                    result = self.send_echo(key)        # Se envía un echo a cada vecino y se espera respuesta
-
-                    if result:  # Si la respuesta es positiva
-
-                        # Se crea el primer paquete de información
-                        string_array = str(self.tabla)
-                        tabla = {"type":"info", 
-                            "headers": {"from": f"{self.graph}", "to": f"{key}", "hop_count": 1},
-                            "payload": string_array}
-                        
-                        tabla_send = json.dumps(tabla)  # Se envía el paquete de información
-                        print(f"\n{tabla_send}")
-                    print("---------------------------")
+            self.broadcast_table()
 
         while True:
-            mensaje = input("\n¿Desea ingresar un paquete JSON? (y/n): ")
-            if mensaje == "n":
-                print("Saliendo...")
-                break
 
             incoming_tabla = self.convert_to_dict()
 
@@ -105,30 +85,31 @@ class Dijkstra():
     def dijkstra(self, info):
         origin = info["headers"]["from"]
         destino = info["headers"]["to"]
-        visited = info["headers"]["visited"]
 
-        # Si la tabla está completa, se broadcastea a todos los nodos
-        if len(visited) == len(self.keys):
-            print(f"\nTabla final:\n {info}")
-            
-            for key, value in self.topologia[self.graph].items():
-                if key != self.graph or value != 0 or key != origin:
-                    print("\n---------------------------")
-                    result = self.send_echo(key)            # Se envía un echo a cada vecino y se espera respuesta
+        # Si la tabla está incompleta, se actualiza si hay un cambio
+        if self.is_empty(self.tabla):
 
-                    if result:
-                        tabla_send = json.dumps(info)       # Si se recibe respuesta, se envía el paquete de información
-                        print(f"\n{tabla_send}")
-                    print("---------------------------")
+            tabla = json.loads(info["payload"].replace("'", '"'))
+            original_tabla = self.tabla
 
-            return
+            if not self.are_nested_arrays_equal(tabla, original_tabla):
+                # Actualizar original_tabla con los valores de tabla
+                for i in range(len(tabla)):
+                    for j in range(len(tabla[i])):
+                        if original_tabla[i][j] == 9999:
+                            original_tabla[i][j] = tabla[i][j]
 
+                self.tabla = original_tabla
 
-        # Si la tabla no está completa, se revisa si el nodo actual y se ejecuta Dijsktra
-        tabla = json.loads(info["payload"].replace("'", '"'))
-        original_tabla = json.loads(self.tabla["payload"].replace("'", '"'))
+                print("Tabla actualizada.\n")
 
+                self.broadcast_table()
 
+        else:
+            print("---------------------------")
+            print(f"\nTABLA ACTUAL:\n {self.tabla}")
+            print("\nNodo listo para recibir y enviar mensajes.\n")
+            print("---------------------------")
 
     def echo(self, info):
         origin = info["headers"]["from"]
@@ -140,13 +121,13 @@ class Dijkstra():
                     "payload": "ping"}
         
             tabla_json = json.dumps(tabla)
-            print(f"\nECHO:\n {tabla_json}")
+            print(f"ECHO: {tabla_json}")
 
         else:
             tabla = {"type":"None"}
 
             tabla_json = json.dumps(tabla)
-            print(f"\nECHO: {tabla_json}")
+            print(f"ECHO: {tabla_json}")
 
     def send_echo(self, destino):
         tabla = {"type":"echo", 
@@ -154,8 +135,8 @@ class Dijkstra():
                     "payload": "ping"}
         
         tabla_json = json.dumps(tabla)
-        print(f"ECHO:  {tabla_json}")
-        print("ECHO enviado exitosamente. Esperando respuesta...\n")
+        print(f"\nECHO:  {tabla_json}")
+        print("ECHO enviado exitosamente. Esperando respuesta...")
         echo_regreso = self.convert_to_dict()
 
         if echo_regreso != None and echo_regreso["type"] == "echo":
@@ -180,5 +161,49 @@ class Dijkstra():
         
         return True
 
+    def is_empty(self, tabla):
+        
+        for i in range(len(tabla)):
+            for j in range(len(tabla[i])):
+                if tabla[i][j] == 9999:
+                    return True
+        
+        return False
+
+    def broadcast_table(self):
+        if not self.is_empty(self.tabla):
+            print("---------------------------")
+            print(f"\nTABLA ACTUAL:\n {self.tabla}")
+            print("\nNodo listo para recibir y enviar mensajes.")
+            print("---------------------------")
+            return
+        
+        # Le manda a todos los vecinos un echo
+        if not self.done:
+            print("\n---------------------------")
+            for key, value in self.topologia[self.graph].items():
+                if key != self.graph and value != 0:
+                    self.send_echo(key)        # Se envía un echo a cada vecino y se espera respuesta
+                    self.done = True
+                    print("---------------------------")
+
+        # Le manda a todos los vecinos un echo
+        for key, value in self.topologia[self.graph].items():
+            if key != self.graph and value != 0:
+                    
+                    # Se crea el primer paquete de información
+                    string_array = str(self.tabla)
+                    tabla = {"type":"info", 
+                        "headers": {"from": f"{self.graph}", "to": f"{key}", "hop_count": 1},
+                        "payload": string_array}
+                    
+                    tabla_send = json.dumps(tabla)  # Se envía el paquete de información
+                    print(f"\n{tabla_send}")
+        return
+
+
+
+        
+        self.broadcast_table()
 
 main = Dijkstra()
