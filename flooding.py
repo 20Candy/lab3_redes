@@ -5,7 +5,21 @@ class FloodingSimulation():
         self.graph = self.select_node()
         self.sent_messages = set()  # Historial de mensajes enviados
         self.received_from = None  # Nodo que le envió el último mensaje
+        self.available_nodes = self.getAvailableNodes()
         self.main()
+
+    def getAvailableNodes(self):
+        with open('topologia.txt', 'r') as file:
+            data = json.load(file)
+
+        nodes = list(data.keys())
+
+    def getNeighbors(self, node):
+        with open('topologia.txt', 'r') as file:
+            data = json.load(file)
+
+        neighbors = list(data[node].keys())
+        return neighbors
 
     def main(self):
         while True:
@@ -16,21 +30,27 @@ class FloodingSimulation():
                 self.flood_message(message)
 
             elif option == 2:
-                received_message = self.receive_message()
+                received_message, new_json = self.receive_message()
                 if received_message:
                     print(f"Mensaje recibido: {received_message}")
+                    print(f"Nuevo paquete JSON: {new_json}")
 
             elif option == 3:
                 exit()
 
     def flood_message(self, message):
-        if (self.received_from != self.graph or
-                (self.received_from == self.graph and message not in self.sent_messages)):
-            # Si el mensaje no proviene del nodo anterior o es un mensaje nuevo, lo reenvía
+        if self.received_from != self.graph or message not in self.sent_messages:
+            # Reiniciar la lista de nodos visitados para un nuevo mensaje
+            visited_nodes = [self.graph]
+
             packet = {
                 "type": "message",
-                "source": self.graph,
-                "message": message
+                "headers": {
+                    "from": self.graph,
+                    "to": self.getNeighbors(self.graph),
+                    "visited": visited_nodes
+                },
+                "payload": message
             }
             self.sent_messages.add(message)
             self.received_from = self.graph
@@ -40,15 +60,24 @@ class FloodingSimulation():
         else:
             print("Mensaje no enviado. Ya se envió un mensaje desde este nodo con contenido similar.")
 
+
     def receive_message(self):
         packet = self.convert_to_dict()
 
         if packet and packet["type"] == "message":
-            if packet["message"] not in self.sent_messages and packet["source"] != self.graph:
-                self.received_from = packet["source"]
-                return packet["message"]
+            source = packet["headers"]["from"]
 
-        return None
+            if self.graph not in packet["headers"]["visited"]:
+                self.received_from = source
+
+                # Agregar el nodo actual a la lista de nodos visitados
+                packet["headers"]["visited"].append(self.graph)
+
+                print("AQUI")
+
+                return packet["payload"], json.dumps(packet)
+
+        return None, None
 
     def customMenu(self, options, menu):
         while True:
