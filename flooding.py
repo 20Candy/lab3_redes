@@ -3,6 +3,8 @@ import json
 class FloodingSimulation():
     def __init__(self):
         self.graph = self.select_node()
+        self.sent_messages = set()  # Historial de mensajes enviados
+        self.received_from = None  # Nodo que le envió el último mensaje
         self.main()
 
     def main(self):
@@ -22,20 +24,29 @@ class FloodingSimulation():
                 exit()
 
     def flood_message(self, message):
-        packet = {
-            "type": "message",
-            "source": self.graph,
-            "message": message
-        }
+        if (self.received_from != self.graph or
+                (self.received_from == self.graph and message not in self.sent_messages)):
+            # Si el mensaje no proviene del nodo anterior o es un mensaje nuevo, lo reenvía
+            packet = {
+                "type": "message",
+                "source": self.graph,
+                "message": message
+            }
+            self.sent_messages.add(message)
+            self.received_from = self.graph
 
-        packet_json = json.dumps(packet)
-        print(f"Enviando mensaje: {packet_json}")
+            packet_json = json.dumps(packet)
+            print(f"Enviando mensaje: {packet_json}")
+        else:
+            print("Mensaje no enviado. Ya se envió un mensaje desde este nodo con contenido similar.")
 
     def receive_message(self):
         packet = self.convert_to_dict()
 
         if packet and packet["type"] == "message":
-            return packet["message"]
+            if packet["message"] not in self.sent_messages and packet["source"] != self.graph:
+                self.received_from = packet["source"]
+                return packet["message"]
 
         return None
 
