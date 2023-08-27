@@ -63,12 +63,22 @@ class Dijkstra():
                 opt = self.customMenu(["Enviar mensaje.", "Recibir | retransmitir mensaje.", "Salir"], "MENSAJES")
 
                 if opt == 1:
-                    nodo = input("A qué nodo le quieres enviar el mensaje?: ")
+                    while True:
+                        nodo = input("A qué nodo le quieres enviar el mensaje?: ")
+                        
+                        if nodo in self.keys:
+                            if nodo == self.graph:
+                                print("No puedes enviarte un mensaje a ti mismo.")
+                            else:
+                                break
+                        else:
+                            print("Nodo no encontrado. Ingrese un nodo válido.")
                     mensaje = input("Ingresa tu mensaje: ")
 
+                    print("\nMensaje recibido. Enviando...")
                     camino = self.pathfinding(nodo)
-
                     print(f"\nCamino más corto: {camino}")
+                    print(f"Enviar el siguiente paquete a {camino[1]} ...")
 
                     # Se crea el mensaje
                     tabla = {"type":"message", 
@@ -80,6 +90,30 @@ class Dijkstra():
 
                 elif opt == 2:
                     tabla = self.convert_to_dict()
+
+                    header_from = tabla["headers"]["from"]
+                    header_to = tabla["headers"]["to"]
+
+                    if header_to == self.graph:
+                        print(f"\nMensaje de {header_from}: {tabla['payload']}")
+                        print(f"El mensaje ha llegado a su destino.")
+
+                    else:
+                        
+                        print("\nMensaje recibido. Retransmitiendo...")
+                        camino = self.pathfinding(header_to)
+                        print(f"\nCamino más corto: {camino}")
+                        print(f"Enviar el siguiente paquete a {camino[1]} ...")
+
+                        tabla["headers"]["hop_count"] -= 1
+                        
+                        if tabla["headers"]["hop_count"] == 0:
+                            print(f"\nMensaje de {header_from} para {header_to}: {tabla['payload']}")
+                            print(f"El mensaje no ha llegado a su destino. Se acabaron los saltos.")
+
+                        else:
+                            tabla_send = json.dumps(tabla)
+                            print(f"\n{tabla_send}")
 
                 elif opt == 3:
                     exit()
