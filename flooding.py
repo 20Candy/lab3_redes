@@ -26,28 +26,46 @@ class FloodingSimulation():
             option = self.customMenu(["Enviar mensaje.", "Recibir mensaje.", "Salir"], "FLOODING")
 
             if option == 1:
+                while True:
+                    nodo = input("A qué nodo le quieres enviar el mensaje?: ")
+                    
+                    if nodo in self.getNeighbors(self.graph):
+                        if nodo == self.graph:
+                            print("No puedes enviarte un mensaje a ti mismo.")
+                        else:
+                            break
+                    else:
+                        print("Nodo no es tu vecino / no encontrado. Ingrese un nodo válido.")
+
                 message = input("Ingrese su mensaje: ")
-                self.flood_message(message)
+                self.flood_message(message, nodo)
 
             elif option == 2:
                 received_message, new_json = self.receive_message()
                 if received_message:
-                    print(f"Mensaje recibido: {received_message}")
-                    print(f"Nuevo paquete JSON: {new_json}")
+                    print(f"\nMensaje recibido: {received_message}")
+
+                if new_json:
+                    print(f"\nNuevo paquete JSON: {new_json}")
 
             elif option == 3:
                 exit()
 
-    def flood_message(self, message):
+    def flood_message(self, message, node):
         if self.received_from != self.graph or message not in self.sent_messages:
             # Reiniciar la lista de nodos visitados para un nuevo mensaje
             visited_nodes = [self.graph]
+
+            visiting = self.getNeighbors(self.graph)
+            visiting.remove(self.graph)
+
+            print(f"\n*copiar y pegar en terminales: {visiting}*")
 
             packet = {
                 "type": "message",
                 "headers": {
                     "from": self.graph,
-                    "to": self.getNeighbors(self.graph),
+                    "to": node,
                     "visited": visited_nodes
                 },
                 "payload": message
@@ -66,6 +84,11 @@ class FloodingSimulation():
 
         if packet and packet["type"] == "message":
             source = packet["headers"]["from"]
+            destination = packet["headers"]["to"]
+
+            if destination == self.graph:
+                message = "\n\nEmisor: " + source + "\nMensaje: " + packet["payload"]
+                return message, None
 
             if self.graph not in packet["headers"]["visited"]:
                 self.received_from = source
@@ -73,9 +96,13 @@ class FloodingSimulation():
                 # Agregar el nodo actual a la lista de nodos visitados
                 packet["headers"]["visited"].append(self.graph)
 
-                print("AQUI")
+                visiting = self.getNeighbors(self.graph)
+                visiting.remove(self.graph)
 
-                return packet["payload"], json.dumps(packet)
+                send_to = [node for node in visiting if node not in packet["headers"]["visited"]]
+
+                mensaje = f"\n*retransmitir mensaje a {send_to}*"
+                return mensaje, json.dumps(packet)
 
         return None, None
 

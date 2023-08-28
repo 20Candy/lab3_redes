@@ -80,7 +80,7 @@ class Dijkstra():
                     print(f"\nCamino más corto: {camino}")
                     print(f"Enviar el siguiente paquete a {camino[1]} ...")
 
-                    # Se crea el mensaje
+                    # Se crea el mensaje a enviar
                     tabla = {"type":"message", 
                         "headers": {"from": f"{self.graph}", "to": f"{nodo}", "hop_count": len(camino)},
                         "payload": mensaje}
