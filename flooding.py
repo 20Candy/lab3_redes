@@ -4,6 +4,7 @@ class FloodingSimulation():
     def __init__(self):
         self.graph = self.select_node()
         self.sent_messages = set()  # Historial de mensajes enviados
+        self.receive_messages = set()  # Historial de mensajes recibidos
         self.received_from = None  # Nodo que le envió el último mensaje
         self.available_nodes = self.getAvailableNodes()
         self.main()
@@ -52,7 +53,7 @@ class FloodingSimulation():
                 exit()
 
     def flood_message(self, message, node):
-        if self.received_from != self.graph or message not in self.sent_messages:
+        if self.received_from != self.graph and message not in self.sent_messages:
             # Reiniciar la lista de nodos visitados para un nuevo mensaje
             visited_nodes = [self.graph]
 
@@ -86,23 +87,32 @@ class FloodingSimulation():
             source = packet["headers"]["from"]
             destination = packet["headers"]["to"]
 
-            if destination == self.graph:
-                message = "\n\nEmisor: " + source + "\nMensaje: " + packet["payload"]
-                return message, None
+            if packet["payload"] not in self.receive_messages:
 
-            if self.graph not in packet["headers"]["visited"]:
-                self.received_from = source
+                if destination == self.graph:
+                    message = "\n\nEmisor: " + source + "\nMensaje: " + packet["payload"]
+                    self.receive_messages.add(packet["payload"])
+                    return message, None
 
-                # Agregar el nodo actual a la lista de nodos visitados
-                packet["headers"]["visited"].append(self.graph)
+                if self.graph not in packet["headers"]["visited"]:
+                    self.received_from = source
 
-                visiting = self.getNeighbors(self.graph)
-                visiting.remove(self.graph)
+                    self.receive_messages.add(packet["payload"])
 
-                send_to = [node for node in visiting if node not in packet["headers"]["visited"]]
+                    # Agregar el nodo actual a la lista de nodos visitados
+                    packet["headers"]["visited"].append(self.graph)
 
-                mensaje = f"\n*retransmitir mensaje a {send_to}*"
-                return mensaje, json.dumps(packet)
+                    visiting = self.getNeighbors(self.graph)
+                    visiting.remove(self.graph)
+
+                    send_to = [node for node in visiting if node not in packet["headers"]["visited"]]
+
+                    mensaje = f"\n*retransmitir mensaje a {send_to}*"
+                    return mensaje, json.dumps(packet)
+            
+            else:
+                print("Mensaje no recibido. Ya se recibió un mensaje desde este nodo con contenido similar.")
+                return None, None
 
         return None, None
 
