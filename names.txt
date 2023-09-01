@@ -1,0 +1,4 @@
+{
+    "type":"names",
+    "config": {"A": "alfa@alumchat.xyz", "B": "betta@alumchat.xyz", "C": "charlie@alumchat.xyz"}
+}

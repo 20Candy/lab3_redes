@@ -1,129 +1,383 @@
 import json
+from slixmpp.exceptions import IqError, IqTimeout
+from slixmpp.xmlstream import ElementBase, ET, register_stanza_plugin
+import slixmpp
+import prettytable
+import threading
+import asyncio
+import aioconsole 
+import base64
+import time
 
-class Dijkstra():
-    def __init__(self):
-        self.done = False
-        self.mensajes = False
-        self.graph = self.select_node()
-        self.tabla = self.tabla_enrutamiento()
-        self.main()
+class Server(slixmpp.ClientXMPP):
+
+    '''
+    init: Constructor de la clase Server. Inicializa los handlers de eventos y el estado de logged_in.
+    '''
+
+    def __init__(self, jid, password):
+        self.email = jid
+        self.old = True
+
+        super().__init__(jid, password)
+        #-----> Plugins generados por GitHub Copilot
+        self.register_plugin('xep_0030')                                   # Registrar plugin: Service Discovery
+        self.register_plugin('xep_0045')                                   # Registrar plugin: Multi-User Chat
+        self.register_plugin('xep_0085')                                   # Registrar plugin: Chat State Notifications
+        self.register_plugin('xep_0199')                                   # Registrar plugin: XMPP Ping
+        self.register_plugin('xep_0353')                                   # Registrar plugin: Chat Markers
+        #-------------------------------
+
+        #-----> Handlers de eventos
+        self.add_event_handler("session_start", self.start)                 # Handler para cuando se inicia sesión
+        self.add_event_handler("message", self.message)                     # Handler para cuando se recibe un mensaje
+
+        self.logged_in = False
+        self.topologia = None
+
+        self.echo_send = []
+        self.echoed = []
+
+        self.traza_mensajes = []
+
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    start: Función que se ejecuta al iniciar sesión en el servidor de forma asincrónica.
+    '''
+
+    async def start(self, event):
+        try:
+            self.send_presence()                                            # Enviar presencia  
+            self.get_roster()                                               # Obtener roster   
+
+            await asyncio.sleep(2)
+            self.old = False
+            self.tabla = await self.tabla_enrutamiento()             # Generar tabla de enrutamiento
+
+            print("\n\n----- NOTIFICACION: ECHO -----")
+
+            #-----> Enviar a vecinos echo
+            for key in self.topologia[self.graph]:
+
+                if key != self.graph:
+                    tabla = {"type":"echo", 
+                    "headers": {"from": f"{self.graph}", "to": f"{key}", "hop_count": 1},
+                    "payload": "ping"}
+                    
+                    tabla_send = json.dumps(tabla)
+                    email_destino = self.keys[key]
+
+                    print(f"\n--> Enviando echo a {email_destino}...")
+
+                    self.echo_send.append(email_destino)
+                    self.send_message(mto=email_destino, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
+            
+            print("--------------------------------")
+
+            #-----> Generado por ChatGPT
+            xmpp_menu_task = asyncio.create_task(self.xmpp_menu())          # Creación de hilo para manejar el menú de comunicación
+            #---------------------------
+            
+            await xmpp_menu_task            
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    xmpp_menu: Función que muestra el menú de comunicación y ejecuta las funciones correspondientes a cada opción.
+    '''
+
+    async def xmpp_menu(self):
+        self.logged_in = True
+
+        print("\n---------- MENSAJES / NOTIFICACIONES ----------")
+        await asyncio.sleep(5)
+
+        opcion_comunicacion = 0
+        while opcion_comunicacion != 4:
+
+            opcion_comunicacion = await self.mostrar_menu_comunicacion()
+
+            if opcion_comunicacion == 1:
+                # Mostrar tabla de enrutamiento
+                print("\n----- TABLA DE ENRUTAMIENTO -----")
+                print(self.tabla)
+                await asyncio.sleep(1)
+
+            elif opcion_comunicacion == 2:
+                await self.dijkstra()
+                await asyncio.sleep(1)
+
+            elif opcion_comunicacion == 3:
+                # Enviar mensaje a un usuario
+                await self.send_msg_to_user()
+                await asyncio.sleep(1)
+
+            elif opcion_comunicacion == 4:
+                # Cerrar sesión con una cuenta
+                print("\n--> Sesión cerrada. Hasta luego.")
+                self.disconnect()
+                exit()
+
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    send_msg_to_user: Función que envía un mensaje a un usuario.
+    '''
+
+    async def send_msg_to_user(self):
+        print("\n----- ENVIAR MENSAJE A USUARIO -----")
+
+        node_name = None
+        while True:
+            print("Seleccione un nodo de la lista: ")
+            keys = list(value for key, value in self.keys.items())
+            keys_nodes = list(key for key, value in self.keys.items())
+
+            for i, key in enumerate(keys):
+                print(f"{i+1}. {key}")
+
+            try:
+                node = await aioconsole.ainput("Ingrese el número del nodo: ")
+                node = int(node)
+                if node > 0 and node <= len(self.keys):
+                    if self.graph == keys_nodes[node-1]:
+                        print("--> No puede enviar un mensaje a sí mismo.\n")
+                        continue
+                    else:
+                        node_name = keys_nodes[node-1]
+                        break
+                else:
+                    print("Ingrese un número válido")
+
+            except ValueError:
+                print("Ingrese un número válido")
+
+        user_input = await aioconsole.ainput("Mensaje: ")                            # Obtener el mensaje a enviar
+
+        tabla = {"type":"message",
+                "headers": {"from": f"{self.graph}", "to": f"{node_name}", "hop_count": 1},
+                "payload": user_input}
+        
+        tabla_send = json.dumps(tabla)  # Se envía el paquete de información
+        
+        camino = await self.pathfinding(node_name)
+        print(f"\n--> Camino más corto: {camino}")
+        next_node = camino[1]
+
+        recipient_jid = self.keys[next_node]                                        # Obtener el JID del destinatario
+
+        self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
+        print(f"--> Mensaje enviado a {next_node}, con destino a {node_name}.")
+        print("----------------------")
+
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    message: Función que se ejecuta de forma asincrónica al recibir un mensaje.
+    '''
+
+    async def message(self, msg):
+
+        if self.old:
+            return
+        
+        if msg['type'] == 'chat' and "echo" in msg['body']:
+            person = msg['from'].bare                                               # Si se recibe un echo, se obtiene el nombre de usuario
+
+            mensaje_recibido = await self.convert_to_dict(msg['body'].replace("'", '"'))
+            hop_count = mensaje_recibido["headers"]["hop_count"]
+
+            if hop_count == 1:
+
+                self.echoed.append(person)
+                node_name = ""
+                for key, value in self.keys.items():
+                    if value == person:
+                        node_name = key
+
+                tabla = {"type":"echo", 
+                    "headers": {"from": f"{self.graph}", "to": f"{node_name}", "hop_count": 2},
+                    "payload": "ping"}
+                
+                tabla_send = json.dumps(tabla)                    
+                self.send_message(mto=person, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
+
+                self.echo_send.append(person)
+                self.echoed.append(person)
+
+                self.echo_send = list(set(self.echo_send))
+                self.echoed = list(set(self.echoed))
+
+                print(f"\n--> {person} ha hecho echo. Haciendo echo de vuelta.")
+                await self.broadcast_table(person)
+
+            elif hop_count == 2:
+                self.echoed.append(person)
+                self.echoed = list(set(self.echoed))
+
+                print(f"\n--> {person} ha hecho echo de vuelta.")
+                await self.broadcast_table(person)
+
+        elif msg['type'] == 'chat' and "info" in msg['body']:
+            
+            person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
+            info = await self.convert_to_dict(msg['body'])
+
+            mensaje = info["payload"].replace("'", '"')
+            tabla_recibida = json.loads(mensaje)
+            original_tabla = self.tabla
+
+            equal = await self.are_nested_arrays_equal(self.tabla, tabla_recibida)
+
+            if not equal:
+                print(f"\n--> {person} ha enviado una tabla de enrutamiento. Actualizando...")
+
+                # Actualizar original_tabla con los valores de tabla
+                for i in range(len(tabla_recibida)):
+                    for j in range(len(tabla_recibida[i])):
+                        if original_tabla[i][j] == 9999:
+                            original_tabla[i][j] = tabla_recibida[i][j]
+
+                self.tabla = original_tabla
+                for nodo in self.echoed:
+                    await self.broadcast_table(nodo)
+                    await asyncio.sleep(1)
+
+            else:
+                print(f"\n--> {person} ha enviado una tabla de enrutamiento. No hay cambios.")
+
+        elif msg['type'] == 'chat' and "message" in msg['body']:
+            person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
+            info = await self.convert_to_dict(msg['body'])
+
+            mensaje = info["payload"].replace("'", '"')
+            origen = info["headers"]["from"]
+            destino = info["headers"]["to"]
+
+            if destino == self.graph:
+                email_origen = self.keys[origen]
+
+                print("\n\n----------- MENSAJE -----------")
+                print(f"--> {email_origen} ha enviado un mensaje: {mensaje}")
+                print("--------------------------------")
+                return
+            
+            else:
+                camino = await self.pathfinding(destino)
+                next_node = camino[1]
+
+                recipient_jid = self.keys[next_node]                                        # Obtener el JID del destinatario
+                tabla = {"type":"message",
+                        "headers": {"from": f"{origen}", "to": f"{destino}", "hop_count": 1},
+                        "payload": mensaje}
+                
+                tabla_send = json.dumps(tabla)
+
+                self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
+
+                print("\n\n----------- MENSAJE -----------")
+                print(f"--> {person} ha enviado un mensaje para retransmitir a {next_node}, con destino a {destino}.")
+                print("--------------------------------")
+
+        self.traza_mensajes.append(msg)
+
+    #-------------------------------------------------------------------------------------------------------------------
+    async def mostrar_menu_comunicacion(self):
+        print("\n----- MENÚ DE COMUNICACIÓN -----")
+        print("1) Revisar tabla enrutamiento")
+        print("2) Calcular rutas más cortas (Dijkstra)")
+        print("3) Enviar mensaje")
+        print("4) Salir")
+
+        while True:
+            try:
+                opcion = int(await aioconsole.ainput("Ingrese el número de la opción deseada: "))
+                if opcion in range(1, 10):
+                    return opcion
+                else:
+                    print("\n--> Opción no válida. Por favor, ingrese un número del 1 al 9.\n")
+            except ValueError:
+                print("\n--> Entrada inválida. Por favor, ingrese un número entero.\n")
+
+
+    #-------------------------------------------------------------------------------------------------------------------
+    #-------------------------------------------------------------------------------------------------------------------
+    #-------------------------------------------------------------------------------------------------------------------
 
     '''
         Genera la tabla de enrutamiento de cada nodo. 
             - Almacena los pesos de cada relación entre nodos. 
             - Se va llenando por broadcast
     '''
-    def tabla_enrutamiento(self):
+    async def tabla_enrutamiento(self):
+        with open('topo.txt', 'r') as file:
+            topologia = file.read().replace('\n', '').replace("'", '"')
+        self.topologia = json.loads(topologia)["config"]
+
+        with open('names.txt', 'r') as file:
+            data = file.read().replace('\n', '').replace("'", '"')
+        data = json.loads(data)
+        self.keys = data["config"]
+
         # Se genera la tabla de enrutamiento
         array_topologia = [[9999 for i in range(len(self.keys))] for j in range(len(self.keys))]
 
-        for key, value in self.topologia[self.graph].items():
-                array_topologia[self.keys.index(self.graph)][self.keys.index(key)] = value
+        # Buscar llave de correo actual
+        for key, value in self.keys.items():
+            if value == self.email:
+                self.graph = key
+
+        keys_temp = list(self.keys.keys())
+
+        # Llenar tabla de enrutamiento inicial
+        for key in self.topologia[self.graph]:
+            array_topologia[keys_temp.index(self.graph)][keys_temp.index(key)] = 1
+
+        if array_topologia[keys_temp.index(self.graph)][keys_temp.index(self.graph)] == 9999:
+            array_topologia[keys_temp.index(self.graph)][keys_temp.index(self.graph)] = 0
+
+        print(f"\nTABLA DE ENRUTAMIENTO INICIAL:\n {array_topologia}")
 
         return array_topologia
 
     '''
-        Permite comunicarrse con otros nodos.
-            - Si la tabla de enrutamiento no está completa, permite hacer echo y enviar info.
-            - Si la tabla ya está llena, permite comunicarse
+        Le envia a sus vecinos su tabla de enrutamiento por broadcast
     '''
-    def main(self):
+    async def broadcast_table(self, element=None):
+
+        # Imprime las tablas de enrutamiento que tiene que compartir   
+
+        # Nodo seleccionado
+        nodo_name = ""
+        for key, value in self.keys.items():
+            if value == nodo_name:
+                nodo_name = key
+
+        # Se crea el primer paquete de información
+        string_array = str(self.tabla)
+        tabla = {"type":"info", 
+            "headers": {"from": f"{self.graph}", "to": f"{nodo_name}", "hop_count": 1},
+            "payload": string_array}
         
-        # Se selecciona que nodo representa la terminal actual
-        print(f"\nNodo seleccionado: {self.graph}")
-        for key, value in self.topologia.items():
-            if key == self.graph:
-                print(f"Vecinos:")
-                for key, value in value.items():
-                    print(f"{key}: {value}")
+        tabla_send = json.dumps(tabla)  # Se envía el paquete de información
+    
+        print(f"--> Enviando tabla a {element}...")
 
-        # Si el nodo seleccionado es el primero, se crea el primer paquete de información
-        if self.graph == self.keys[0]:
-            self.broadcast_table()
-
-        while True:
-
-            if not self.mensajes:
-                # Se recibe el paquete de información
-                incoming_tabla = self.convert_to_dict()
-
-                # Dependiendo del tipo de paquete, se ejecuta una función
-                type = incoming_tabla["type"]
-
-                if type == "info":          # Se recibe la tabla de enrutamiento
-                    self.dijkstra(incoming_tabla)
-                
-                elif type == "echo":        # Se recibe un echo
-                    self.echo(incoming_tabla)
-
-                elif type == "message":     # Se recibe un mensaje
-                    print("El nodo aún no está listo para recibir mensajes.")
-
-            else:
-                opt = self.customMenu(["Enviar mensaje.", "Recibir | retransmitir mensaje.", "Salir"], "MENSAJES")
-
-                if opt == 1:
-                    while True:
-                        nodo = input("A qué nodo le quieres enviar el mensaje?: ")
-                        
-                        if nodo in self.keys:
-                            if nodo == self.graph:
-                                print("No puedes enviarte un mensaje a ti mismo.")
-                            else:
-                                break
-                        else:
-                            print("Nodo no encontrado. Ingrese un nodo válido.")
-                    mensaje = input("Ingresa tu mensaje: ")
-
-                    print("\nMensaje recibido. Enviando...")
-                    camino = self.pathfinding(nodo)
-                    print(f"\nCamino más corto: {camino}")
-                    print(f"Enviar el siguiente paquete a {camino[1]} ...")
-
-                    # Se crea el mensaje a enviar
-                    tabla = {"type":"message", 
-                        "headers": {"from": f"{self.graph}", "to": f"{nodo}", "hop_count": len(camino)},
-                        "payload": mensaje}
-                    
-                    tabla_send = json.dumps(tabla)  # Se envía el paquete de información
-                    print(f"\n{tabla_send}")
-
-                elif opt == 2:
-                    tabla = self.convert_to_dict()
-
-                    header_from = tabla["headers"]["from"]
-                    header_to = tabla["headers"]["to"]
-
-                    if header_to == self.graph:
-                        print(f"\nMensaje de {header_from}: {tabla['payload']}")
-                        print(f"El mensaje ha llegado a su destino.")
-
-                    else:
-                        
-                        print("\nMensaje recibido. Retransmitiendo...")
-                        camino = self.pathfinding(header_to)
-                        print(f"\nCamino más corto: {camino}")
-                        print(f"Enviar el siguiente paquete a {camino[1]} ...")
-
-                        tabla["headers"]["hop_count"] -= 1
-                        
-                        if tabla["headers"]["hop_count"] == 0:
-                            print(f"\nMensaje de {header_from} para {header_to}: {tabla['payload']}")
-                            print(f"El mensaje no ha llegado a su destino. Se acabaron los saltos.")
-
-                        else:
-                            tabla_send = json.dumps(tabla)
-                            print(f"\n{tabla_send}")
-
-                elif opt == 3:
-                    exit()
+        self.send_message(mto=element, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
 
     '''
         Después de haber calculado las distancias más cortas, se genera el camino más corto
     '''
-    def pathfinding(self, destino):
+    async def pathfinding(self, destino):
         camino_actual = []
-        current = self.keys.index(destino)
+        keys = list(self.keys.keys())
+        
+        current = 0
+        for i in range(len(keys)):
+            if keys[i] == destino:
+                current = i
+
         while current != -1:
             camino_actual.insert(0, current)
             current = self.enlaces[current]
@@ -131,207 +385,74 @@ class Dijkstra():
         camino_nombres = []
 
         for i in camino_actual:
-            camino_nombres.append(self.keys[i])
+            camino_nombres.append(keys[i])
 
         return camino_nombres
-
 
     '''
         Recibe información de las tablas de enrutamiento y las actualiza. 
             - Si las tablas ya están llenas, con Dijkstra calcula las distancias más cortas.
     '''
-    def dijkstra(self, info):
-        # Si la tabla está incompleta, se actualiza si hay un cambio
-        if self.is_empty(self.tabla):
+    async def dijkstra(self):
+        print("\n-----------  DIJKSTRA  -----------")
+        print(f"TABLA ACTUAL: {self.tabla}")
 
-            tabla = json.loads(info["payload"].replace("'", '"'))
-            original_tabla = self.tabla
+        inicio = 0
+        keys = list(self.keys.keys())
+        for i in range(len(keys)):
+            if keys[i] == self.graph:
+                inicio = i
 
-            if not self.are_nested_arrays_equal(tabla, original_tabla):
-                # Actualizar original_tabla con los valores de tabla
-                for i in range(len(tabla)):
-                    for j in range(len(tabla[i])):
-                        if original_tabla[i][j] == 9999:
-                            original_tabla[i][j] = tabla[i][j]
+        cant_nodos = len(self.tabla)
+        visitado = [False for _ in range(cant_nodos)]
+        costo_enlace = [float('inf') for _ in range(cant_nodos)]
+        enlace = [-1 for _ in range(cant_nodos)]
+        costo_enlace[inicio] = 0
 
-                self.tabla = original_tabla
+        for _ in range(cant_nodos):
+            min_distance = float('inf')
+            min_node = -1
 
-                print("Tabla actualizada.\n")
+            for node in range(cant_nodos):
+                if not visitado[node] and costo_enlace[node] < min_distance:
+                    min_distance = costo_enlace[node]
+                    min_node = node
 
-                self.broadcast_table()
+            if min_node == -1:
+                break
 
-        if not self.is_empty(self.tabla):
-            print("---------------------------")
-            print(f"\nTABLA ACTUAL:\n {self.tabla}")
-            print("\nNodo listo para recibir y enviar mensajes.\n")
-            print("---------------------------")
+            visitado[min_node] = True
 
-            inicio = self.keys.index(self.graph)
+            for neighbor in range(cant_nodos):
+                if (not visitado[neighbor] and
+                        self.tabla[min_node][neighbor] > 0 and
+                        costo_enlace[min_node] + self.tabla[min_node][neighbor] < costo_enlace[neighbor]):
+                    costo_enlace[neighbor] = costo_enlace[min_node] + self.tabla[min_node][neighbor]
+                    enlace[neighbor] = min_node
 
-            cant_nodos = len(self.tabla)
-            visitado = [False for _ in range(cant_nodos)]
-            costo_enlace = [float('inf') for _ in range(cant_nodos)]
-            enlace = [-1 for _ in range(cant_nodos)]
-            costo_enlace[inicio] = 0
+        self.enlaces = enlace
+        self.costo_enlaces = costo_enlace
 
-            for _ in range(cant_nodos):
-                min_distance = float('inf')
-                min_node = -1
+        print(f"COSTO ENLACES: {self.costo_enlaces}")
+        print("---------------------------")
 
-                for node in range(cant_nodos):
-                    if not visitado[node] and costo_enlace[node] < min_distance:
-                        min_distance = costo_enlace[node]
-                        min_node = node
-
-                if min_node == -1:
-                    break
-
-                visitado[min_node] = True
-
-                for neighbor in range(cant_nodos):
-                    if (not visitado[neighbor] and
-                            self.tabla[min_node][neighbor] > 0 and
-                            costo_enlace[min_node] + self.tabla[min_node][neighbor] < costo_enlace[neighbor]):
-                        costo_enlace[neighbor] = costo_enlace[min_node] + self.tabla[min_node][neighbor]
-                        enlace[neighbor] = min_node
-
-            self.enlaces = enlace
-            self.costo_enlaces = costo_enlace
-
-            self.mensajes = True
-
-    '''
-        Si se hace echo, lo escucha y dependiendo de si son nodos, retorna algo.
-            - Si el nodo que hizo echo es adyacente, le hace echo de regreso.
-    '''
-    def echo(self, info):
-        origin = info["headers"]["from"]
-        destino = info["headers"]["to"]
-
-        if origin in self.topologia[destino]:
-            tabla = {"type":"echo", 
-                    "headers": {"from": f"{self.graph}", "to": f"{origin}", "hop_count": 2},
-                    "payload": "ping"}
-        
-            tabla_json = json.dumps(tabla)
-            print(f"ECHO: {tabla_json}")
-
-        else:
-            tabla = {"type":"None"}
-
-            tabla_json = json.dumps(tabla)
-            print(f"ECHO: {tabla_json}")
-
-    '''
-        Envia un echo y espera para que le hagan echo de regreso
-    '''
-    def send_echo(self, destino):
-        tabla = {"type":"echo", 
-                    "headers": {"from": f"{self.graph}", "to": f"{destino}", "hop_count": 1},
-                    "payload": "ping"}
-        
-        tabla_json = json.dumps(tabla)
-        print(f"\nECHO:  {tabla_json}")
-        print("ECHO enviado exitosamente. Esperando respuesta...")
-        echo_regreso = self.convert_to_dict()
-
-        if echo_regreso != None and echo_regreso["type"] == "echo":
-            print("ECHO recibido exitosamente")
-            return True
-        
-        else:
-            print("ECHO no recibido")
-            return False
-        
-    '''
-        Le envia a sus vecinos su tabla de enrutamiento por broadcast
-    '''
-    def broadcast_table(self):
-        if not self.is_empty(self.tabla):
-            return
-        
-        # Le manda a todos los vecinos un echo
-        if not self.done:
-            print("\n---------------------------")
-            for key, value in self.topologia[self.graph].items():
-                if key != self.graph and value != 0:
-                    self.send_echo(key)        # Se envía un echo a cada vecino y se espera respuesta
-                    self.done = True
-                    print("---------------------------")
-
-        # Imprime las tablas de enrutamiento que tiene que compartir
-        for key, value in self.topologia[self.graph].items():
-            if key != self.graph and value != 0:
-                    
-                    # Se crea el primer paquete de información
-                    string_array = str(self.tabla)
-                    tabla = {"type":"info", 
-                        "headers": {"from": f"{self.graph}", "to": f"{key}", "hop_count": 1},
-                        "payload": string_array}
-                    
-                    tabla_send = json.dumps(tabla)  # Se envía el paquete de información
-                    print(f"\n{tabla_send}")
-
-# ------------ MENUS y HERRAMIENTAS
-
-    def customMenu(self, options, menu):
-        while True:
-            print(f"\n----- {menu} -----")
-            for i in range(len(options)):
-                print(f"{i+1}) {options[i]}")
-
-            try:
-                opcion = int(input("Ingrese el número de la opción deseada: "))
-                if opcion in range(1, len(options)+1):
-                    return opcion
-                else:
-                    print(f"\n--> Opción no válida. Por favor, ingrese un número del 1 al {len(options)}.\n")
-
-            except ValueError:
-                print("\n--> Entrada inválida. Por favor, ingrese un número entero.\n")
-
-    def convert_to_dict(self):
+# ------------ MENUS y HERRAMIENTAS ------------
+    async def convert_to_dict(self, paquete):
         try:
-            input_str = input("\nIngrese su paquete JSON: ")
+            input_str = paquete.replace("'", '"')
             data = json.loads(input_str)
             return data
         except json.JSONDecodeError as err:
             print(err)
             return None
-        
-    def select_node(self):
-        with open('estructura.txt', 'r') as file:
-            data = file.read().replace('\n', '')
-        data = json.loads(data)
 
-        with open('topologia.txt', 'r') as file:
-            topologia = file.read().replace('\n', '')
-        self.topologia = json.loads(topologia)
-
-
-        while True:
-            print("\n---DIJKSTRA---\nSeleccione un nodo de la lista: ")
-            self.keys = list(data.keys())
-            for i, key in enumerate(data):
-                print(f"{i+1}. {key}")
-
-            try:
-                node = int(input("Ingrese el número del nodo: "))
-                if node > 0 and node <= len(data):
-                    return self.keys[node-1]
-                else:
-                    print("Ingrese un número válido")
-
-            except ValueError:
-                print("Ingrese un número válido")
-
-    def are_nested_arrays_equal(self, arr1, arr2):
+    async def are_nested_arrays_equal(self, arr1, arr2):
         if len(arr1) != len(arr2):
             return False
         
         for i in range(len(arr1)):
             if isinstance(arr1[i], list) and isinstance(arr2[i], list):
-                if not self.are_nested_arrays_equal(arr1[i], arr2[i]):
+                if not await self.are_nested_arrays_equal(arr1[i], arr2[i]):
                     return False
             else:
                 if arr1[i] != arr2[i]:
@@ -339,14 +460,31 @@ class Dijkstra():
         
         return True
 
-    def is_empty(self, tabla):
-        
-        for i in range(len(tabla)):
-            for j in range(len(tabla[i])):
-                if tabla[i][j] == 9999:
-                    return True
-        
-        return False
+
+def select_node():
+    with open('names.txt', 'r') as file:
+        data = file.read().replace('\n', '').replace("'", '"')
+    data = json.loads(data)
+    data = data["config"]
+
+    while True:
+        print("\n---DIJKSTRA---\nSeleccione un nodo de la lista: ")
+        keys = list(value for key, value in data.items())
+        for i, key in enumerate(keys):
+            print(f"{i+1}. {key}")
+
+        try:
+            node = int(input("Ingrese el número del nodo: "))
+            if node > 0 and node <= len(data):
+                return keys[node-1]
+            else:
+                print("Ingrese un número válido")
+
+        except ValueError:
+            print("Ingrese un número válido")
 
 
-main = Dijkstra()
+usuario = select_node()
+server = Server(usuario, "123")            # Crear instancia del servidor con usuario y contraseña
+server.connect(disable_starttls=True)      # Conexión al servidor
+server.process(forever=False)              # Programa corre hasta que se cierra la conexión
