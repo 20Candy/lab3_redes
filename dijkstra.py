@@ -460,7 +460,6 @@ class Server(slixmpp.ClientXMPP):
         
         return True
 
-
 def select_node():
     with open('names.txt', 'r') as file:
         data = file.read().replace('\n', '').replace("'", '"')
