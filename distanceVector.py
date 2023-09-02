@@ -8,11 +8,6 @@ class BellmanFord():
         self.mensajes = False  # Add the 'mensajes' attribute
         self.main()
 
-    '''
-        Generate the routing table for each node. 
-            - Store the weights of each relationship between nodes. 
-            - Fills it through broadcasting.
-    '''
     def tabla_enrutamiento(self):
         # Generate the routing table
         array_topologia = [[float('inf') for _ in range(len(self.keys))] for _ in range(len(self.keys))]
@@ -22,11 +17,6 @@ class BellmanFord():
 
         return array_topologia
 
-    '''
-        Communicate with other nodes.
-            - If the routing table is not complete, it allows echo and sending information.
-            - If the table is already full, it allows communication.
-    '''
     def main(self):
         # Select the current terminal node
         print(f"\nSelected Node: {self.graph}")
@@ -58,23 +48,23 @@ class BellmanFord():
                     print("The node is not yet ready to receive messages.")
             
             else:
-                opt = self.customMenu(["Enviar mensaje.", "Recibir | retransmitir mensaje.", "Salir"], "MENSAJES")
+                opt = self.customMenu(["Send Message.", "Recive Message.", "Exit"], "---Messages---")
 
                 if opt == 1:
                     while True:
-                        nodo = input("A qué nodo le quieres enviar el mensaje?: ")
+                        nodo = input("Target Node: ")
 
                         if nodo in self.keys:
                             if nodo == self.graph:
-                                print("No puedes enviarte un mensaje a ti mismo.")
+                                print("You can't send a message to yourself.")
                             else:
                                 break
                         else:
-                            print("Nodo no encontrado. Ingrese un nodo válido.")
+                            print("Node not found.")
                     
-                    mensaje = input("Ingresa tu mensaje: ")
+                    mensaje = input("Write the message you want to send: ")
 
-                    print("\nMensaje recibido. Enviando...")
+                    print("\nSending...")
                     # No need to use 'enlaces' in Bellman-Ford, so remove the next line
                     # camino = self.pathfinding(nodo)
                     
@@ -94,21 +84,21 @@ class BellmanFord():
                     header_to = tabla["headers"]["to"]
 
                     if header_to == self.graph:
-                        print(f"\nMensaje de {header_from}: {tabla['payload']}")
-                        print(f"El mensaje ha llegado a su destino.")
+                        print(f"\nMessage from {header_from}: {tabla['payload']}")
+                        print(f"Message was succesfully sent to it's target node")
 
                     else:
                         
                         print("\nMensaje recibido. Retransmitiendo...")
                         camino = self.pathfinding(header_to)
-                        print(f"\nCamino más corto: {camino}")
-                        print(f"Enviar el siguiente paquete a {camino[1]} ...")
+                        print(f"\nShort Path: {camino}")
+                        print(f"Send package to {camino[1]} ...")
 
                         tabla["headers"]["hop_count"] -= 1
                         
                         if tabla["headers"]["hop_count"] == 0:
-                            print(f"\nMensaje de {header_from} para {header_to}: {tabla['payload']}")
-                            print(f"El mensaje no ha llegado a su destino. Se acabaron los saltos.")
+                            print(f"\nMessage from {header_from} para {header_to}: {tabla['payload']}")
+                            print(f"Message failed getting to it's node.")
 
                         else:
                             tabla_send = json.dumps(tabla)
@@ -209,7 +199,7 @@ class BellmanFord():
         if origin in self.topologia[destination]:
             echo_table = {"type": "echo",
                           "headers": {"from": self.graph, "to": origin, "hop_count": 2},
-                          "payload": "ping"}
+                          "payload": "hop"}
         
             echo_json = json.dumps(echo_table)
             print(f"ECHO: {echo_json}")
@@ -226,7 +216,7 @@ class BellmanFord():
     def send_echo(self, destination):
         echo_table = {"type": "echo",
                       "headers": {"from": self.graph, "to": destination, "hop_count": 1},
-                      "payload": "ping"}
+                      "payload": "hop"}
         
         echo_json = json.dumps(echo_table)
         print(f"\nECHO: {echo_json}")
@@ -313,7 +303,7 @@ class BellmanFord():
                 print(f"{i+1}. {key}")
 
             try:
-                node = int(input("Enter the number of the node: "))
+                node = int(input("Start Node: "))
                 if node > 0 and node <= len(data):
                     return self.keys[node - 1]
                 else:
@@ -346,7 +336,7 @@ class BellmanFord():
     
     def convert_to_dict(self):
         try:
-            input_str = input("\nEnter your JSON packet: ")
+            input_str = input("\nJSON package: ")
             data = json.loads(input_str)
             return data
         except json.JSONDecodeError as err:
