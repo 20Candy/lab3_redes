@@ -65,6 +65,13 @@ class Server(slixmpp.ClientXMPP):
     async def xmpp_menu(self):
         self.logged_in = True
 
+        # Buscar llave de correo actual
+        self.keys = self.getAvailableNodes()
+
+        for key, value in self.keys.items():
+            if value == self.email:
+                self.graph = value
+
         print("\n---------- MENSAJES / NOTIFICACIONES ----------")
         await asyncio.sleep(5)
 
@@ -72,12 +79,6 @@ class Server(slixmpp.ClientXMPP):
         while opcion_comunicacion != 4:
 
             opcion_comunicacion = await self.mostrar_menu_comunicacion()
-            self.keys = self.getAvailableNodes()
-
-            # Buscar llave de correo actual
-            for key, value in self.keys.items():
-                if value == self.email:
-                    self.graph = value
 
             if opcion_comunicacion == 1:
                 # Enviar mensaje a un usuario
@@ -201,10 +202,8 @@ class Server(slixmpp.ClientXMPP):
             destino = info["headers"]["to"]
 
             if destino == self.graph:
-                email_origen = self.keys[origen]
-
                 print("\n\n----------- MENSAJE -----------")
-                print(f"--> {email_origen} ha enviado un mensaje: {mensaje}")
+                print(f"--> {origen} ha enviado un mensaje: {mensaje}")
                 print("--------------------------------")
                 return
             
