@@ -17,7 +17,6 @@ class Server(slixmpp.ClientXMPP):
     def __init__(self, jid, password):
         self.email = jid
         self.old = True
-        self.visited_nodes = []
 
         super().__init__(jid, password)
         #-----> Plugins generados por GitHub Copilot
@@ -34,6 +33,8 @@ class Server(slixmpp.ClientXMPP):
 
         self.logged_in = False
         self.topologia = None
+
+        self.traza_mensajes = []
 
     #-------------------------------------------------------------------------------------------------------------------
     '''
@@ -70,7 +71,7 @@ class Server(slixmpp.ClientXMPP):
 
         for key, value in self.keys.items():
             if value == self.email:
-                self.graph = value
+                self.graph = key
 
         print("\n---------- MENSAJES / NOTIFICACIONES ----------")
         await asyncio.sleep(5)
@@ -104,6 +105,7 @@ class Server(slixmpp.ClientXMPP):
             nodes = self.keys
 
             keys = list(value for key, value in nodes.items())
+            keys_names = list(key for key, value in nodes.items())
             for i, key in enumerate(keys):
                 print(f"{i+1}. {key}")
 
@@ -111,11 +113,11 @@ class Server(slixmpp.ClientXMPP):
                 node = await aioconsole.ainput("Ingrese el número del nodo: ")
                 node = int(node)
                 if node > 0 and node <= len(nodes):
-                    if self.graph == keys[node-1]:
+                    if self.graph == keys_names[node-1]:
                         print("--> No puede enviar un mensaje a sí mismo.\n")
                         continue
                     else:
-                        node_name = keys[node-1]
+                        node_name = keys_names[node-1]
                         break
                 else:
                     print("Ingrese un número válido")
@@ -125,31 +127,32 @@ class Server(slixmpp.ClientXMPP):
 
         user_input = await aioconsole.ainput("Mensaje: ")                                 # Obtener el mensaje a enviar
         
-        for node in self.keys:
-            vecinos = self.getNeighbors(node)
+        visited_nodes = [self.graph]                       # Agregar el nodo actual a la lista de nodos visitados
 
-            for vecino in vecinos:
+        tabla = {
+            "type": "message",
+            "headers": {
+                "from": self.graph,
+                "to": node_name,
+                "visited": visited_nodes
+            },
+            "payload": user_input
+        }
+        tabla_send = json.dumps(tabla)   
 
-                if (vecino not in self.visited_nodes):
+        print("\n----- ENVIANDO MENSAJE -----")
 
-                    self.visited_nodes = self.visited_nodes + [vecino]                       # Agregar el nodo actual a la lista de nodos visitados
+        vecinos = self.getNeighbors(self.graph)              # Obtener los vecinos del nodo actual
+        for vecino in vecinos:
+            if vecino == self.email:
+                continue
 
-                    tabla = {
-                    "type": "message",
-                    "headers": {
-                        "from": self.graph,
-                        "to": node_name,
-                        "visited": self.visited_nodes
-                    },
-                    "payload": user_input
-                    }
-            
-                    tabla_send = json.dumps(tabla)                                           # Se envía el paquete de información
-                    recipient_jid = vecino                                                   # Obtener el JID del destinatario
-
-                    self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')     # Enviar mensaje con librería slixmpp
-                    print(f"--> Mensaje enviado a {vecino}.")
-                    print("----------------------")
+            if (vecino not in visited_nodes):
+                recipient_jid = vecino                                                   # Obtener el JID del destinatario
+                self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')     # Enviar mensaje con librería slixmpp
+                print(f"--> Mensaje enviado a {vecino}.")
+                print("----------------------")
+                await asyncio.sleep(1)
             
     #-------------------------------------------------------------------------------------------------------------------
     def getAvailableNodes(self):
@@ -195,17 +198,68 @@ class Server(slixmpp.ClientXMPP):
         
         if msg['type'] == 'chat' and "message" in msg['body']:
             person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
-            info = await self.convert_to_dict(msg['body'])
+            info = await self.convert_to_dict(msg['body'].replace("'", '"'))
 
-            mensaje = info["payload"].replace("'", '"')
+            mensaje = info["payload"]
             origen = info["headers"]["from"]
             destino = info["headers"]["to"]
+
+            current_msg = str(origen+","+destino+","+mensaje)
+
+            # Lleva registro de mensajes que han entrado
+            if current_msg in self.traza_mensajes:
+                # Si ya había entrado, no retransmite
+                self.traza_mensajes.append(current_msg)
+                return            
+            else:
+                # Si no había entrado, retransmite
+                self.traza_mensajes.append(current_msg)
+
+            visited_nodes = []
+            for element in info["headers"]["visited"]:
+                visited_nodes.append(element)
+
+            if self.graph in visited_nodes:
+                return
 
             if destino == self.graph:
                 print("\n\n----------- MENSAJE -----------")
                 print(f"--> {origen} ha enviado un mensaje: {mensaje}")
                 print("--------------------------------")
                 return
+            
+            else:
+                visited_nodes.append(self.graph)
+                tabla = {
+                    "type": "message",
+                    "headers": {
+                        "from": origen,
+                        "to": destino,
+                        "visited": visited_nodes
+                    },
+                    "payload": mensaje
+                }
+                tabla_send = json.dumps(tabla)
+
+                print("\n\n----- RETRANSMITIENDO MENSAJE -----")
+                
+                vecinos = self.getNeighbors(self.graph)
+                for vecino in vecinos:
+
+                    vecino_name = ""    # Consigue nombre del nodo vecino
+                    for key, value in self.keys.items():
+                        if value == vecino:
+                            vecino_name = key
+
+                    if vecino == self.email or vecino_name == origen or vecino_name in visited_nodes:
+                        continue
+
+                    else:
+                        recipient_jid = vecino                                                   # Obtener el JID del destinatario
+                        self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')     # Enviar mensaje con librería slixmpp
+                        print(f"--> Retransmitiendo mensaje a {vecino}.")
+                        print("-----------------------------------")
+                        await asyncio.sleep(1)
             
     #-------------------------------------------------------------------------------------------------------------------
     async def mostrar_menu_comunicacion(self):
@@ -263,7 +317,7 @@ def select_node():
             print("Ingrese un número válido")
 
 # Para evitar el error de que el evento no se puede ejecutar en Windows
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  #COMENTAR PARA MAC
+# asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  #COMENTAR PARA MAC
 
 usuario = select_node()
 server = Server(usuario, "123")            # Crear instancia del servidor con usuario y contraseña
