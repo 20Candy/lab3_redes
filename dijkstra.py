@@ -9,6 +9,8 @@ import aioconsole
 import base64
 import time
 
+
+
 class Server(slixmpp.ClientXMPP):
 
     '''
@@ -482,6 +484,9 @@ def select_node():
         except ValueError:
             print("Ingrese un número válido")
 
+
+# Para evitar el error de que el evento no se puede ejecutar en Windows
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  #COMENTAR PARA MAC
 
 usuario = select_node()
 server = Server(usuario, "123")            # Crear instancia del servidor con usuario y contraseña

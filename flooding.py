@@ -1,161 +1,272 @@
 import json
+from slixmpp.exceptions import IqError, IqTimeout
+from slixmpp.xmlstream import ElementBase, ET, register_stanza_plugin
+import slixmpp
+import threading
+import asyncio
+import aioconsole 
+import base64
+import time
 
-class FloodingSimulation():
-    def __init__(self):
-        self.graph = self.select_node()
-        self.sent_messages = set()  # Historial de mensajes enviados
-        self.receive_messages = set()  # Historial de mensajes recibidos
-        self.received_from = None  # Nodo que le envió el último mensaje
-        self.available_nodes = self.getAvailableNodes()
-        self.main()
+class Server(slixmpp.ClientXMPP):
 
-    def getAvailableNodes(self):
-        with open('topologia.txt', 'r') as file:
-            data = json.load(file)
+    '''
+    init: Constructor de la clase Server. Inicializa los handlers de eventos y el estado de logged_in.
+    '''
 
-        nodes = list(data.keys())
+    def __init__(self, jid, password):
+        self.email = jid
+        self.old = True
+        self.visited_nodes = []
 
-    def getNeighbors(self, node):
-        with open('topologia.txt', 'r') as file:
-            data = json.load(file)
+        super().__init__(jid, password)
+        #-----> Plugins generados por GitHub Copilot
+        self.register_plugin('xep_0030')                                   # Registrar plugin: Service Discovery
+        self.register_plugin('xep_0045')                                   # Registrar plugin: Multi-User Chat
+        self.register_plugin('xep_0085')                                   # Registrar plugin: Chat State Notifications
+        self.register_plugin('xep_0199')                                   # Registrar plugin: XMPP Ping
+        self.register_plugin('xep_0353')                                   # Registrar plugin: Chat Markers
+        #-------------------------------
 
-        neighbors = list(data[node].keys())
-        return neighbors
+        #-----> Handlers de eventos
+        self.add_event_handler("session_start", self.start)                 # Handler para cuando se inicia sesión
+        self.add_event_handler("message", self.message)                     # Handler para cuando se recibe un mensaje
 
-    def main(self):
-        while True:
-            option = self.customMenu(["Enviar mensaje.", "Recibir mensaje.", "Salir"], "FLOODING")
+        self.logged_in = False
+        self.topologia = None
 
-            if option == 1:
-                while True:
-                    nodo = input("A qué nodo le quieres enviar el mensaje?: ")
-                    
-                    if nodo in self.getNeighbors(self.graph):
-                        if nodo == self.graph:
-                            print("No puedes enviarte un mensaje a ti mismo.")
-                        else:
-                            break
-                    else:
-                        print("Nodo no es tu vecino / no encontrado. Ingrese un nodo válido.")
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    start: Función que se ejecuta al iniciar sesión en el servidor de forma asincrónica.
+    '''
 
-                message = input("Ingrese su mensaje: ")
-                self.flood_message(message, nodo)
+    async def start(self, event):
+        # try:
+        self.send_presence()                                            # Enviar presencia  
+        self.get_roster()                                               # Obtener roster   
 
-            elif option == 2:
-                received_message, new_json = self.receive_message()
-                if received_message:
-                    print(f"\nMensaje recibido: {received_message}")
+        await asyncio.sleep(2)
+        self.old = False
+        
+        #-----> Generado por ChatGPT
+        xmpp_menu_task = asyncio.create_task(self.xmpp_menu())          # Creación de hilo para manejar el menú de comunicación
+        #---------------------------
+        
+        await xmpp_menu_task            
 
-                if new_json:
-                    print(f"\nNuevo paquete JSON: {new_json}")
+        # except Exception as e:
+        #     print(f"Error: {e}")
 
-            elif option == 3:
+    #-------------------------------------------------------------------------------------------------------------------
+    '''
+    xmpp_menu: Función que muestra el menú de comunicación y ejecuta las funciones correspondientes a cada opción.
+    '''
+
+    async def xmpp_menu(self):
+        self.logged_in = True
+
+        print("\n---------- MENSAJES / NOTIFICACIONES ----------")
+        await asyncio.sleep(5)
+
+        opcion_comunicacion = 0
+        while opcion_comunicacion != 4:
+
+            opcion_comunicacion = await self.mostrar_menu_comunicacion()
+            self.keys = self.getAvailableNodes()
+
+            # Buscar llave de correo actual
+            for key, value in self.keys.items():
+                if value == self.email:
+                    self.graph = value
+
+            if opcion_comunicacion == 1:
+                # Enviar mensaje a un usuario
+                await self.send_msg_to_user()
+                await asyncio.sleep(1)
+
+            elif opcion_comunicacion == 2:
+                # Cerrar sesión con una cuenta
+                print("\n--> Sesión cerrada. Hasta luego.")
+                self.disconnect()
                 exit()
 
-    def flood_message(self, message, node):
-        if self.received_from != self.graph and message not in self.sent_messages:
-            # Reiniciar la lista de nodos visitados para un nuevo mensaje
-            visited_nodes = [self.graph]
+     #-------------------------------------------------------------------------------------------------------------------
+    '''
+    send_msg_to_user: Función que envía un mensaje a un usuario.
+    '''
+    async def send_msg_to_user(self):
+        print("\n----- ENVIAR MENSAJE A USUARIO -----")
 
-            visiting = self.getNeighbors(self.graph)
-            visiting.remove(self.graph)
-
-            print(f"\n*copiar y pegar en terminales: {visiting}*")
-
-            packet = {
-                "type": "message",
-                "headers": {
-                    "from": self.graph,
-                    "to": node,
-                    "visited": visited_nodes
-                },
-                "payload": message
-            }
-            self.sent_messages.add(message)
-            self.received_from = self.graph
-
-            packet_json = json.dumps(packet)
-            print(f"Enviando mensaje: {packet_json}")
-        else:
-            print("Mensaje no enviado. Ya se envió un mensaje desde este nodo con contenido similar.")
-
-
-    def receive_message(self):
-        packet = self.convert_to_dict()
-
-        if packet and packet["type"] == "message":
-            source = packet["headers"]["from"]
-            destination = packet["headers"]["to"]
-
-            if packet["payload"] not in self.receive_messages:
-
-                if destination == self.graph:
-                    message = "\n\nEmisor: " + source + "\nMensaje: " + packet["payload"]
-                    self.receive_messages.add(packet["payload"])
-                    return message, None
-
-                if self.graph not in packet["headers"]["visited"]:
-                    self.received_from = source
-
-                    self.receive_messages.add(packet["payload"])
-
-                    # Agregar el nodo actual a la lista de nodos visitados
-                    packet["headers"]["visited"].append(self.graph)
-
-                    visiting = self.getNeighbors(self.graph)
-                    visiting.remove(self.graph)
-
-                    send_to = [node for node in visiting if node not in packet["headers"]["visited"]]
-
-                    mensaje = f"\n*retransmitir mensaje a {send_to}*"
-                    return mensaje, json.dumps(packet)
-            
-            else:
-                print("Mensaje no recibido. Ya se recibió un mensaje desde este nodo con contenido similar.")
-                return None, None
-
-        return None, None
-
-    def customMenu(self, options, menu):
+        node_name = None
         while True:
-            print(f"\n----- {menu} -----")
-            for i in range(len(options)):
-                print(f"{i+1}) {options[i]}")
+            print("Seleccione un nodo de la lista: ")
+            nodes = self.keys
+
+            keys = list(value for key, value in nodes.items())
+            for i, key in enumerate(keys):
+                print(f"{i+1}. {key}")
 
             try:
-                choice = int(input("Ingrese el número de la opción deseada: "))
-                if choice in range(1, len(options)+1):
-                    return choice
-                else:
-                    print(f"\n--> Opción no válida. Por favor, ingrese un número del 1 al {len(options)}.\n")
-
-            except ValueError:
-                print("\n--> Entrada inválida. Por favor, ingrese un número entero.\n")
-
-    def convert_to_dict(self):
-        try:
-            input_str = input("\nIngrese su paquete JSON: ")
-            data = json.loads(input_str)
-            return data
-        except json.JSONDecodeError as err:
-            print(err)
-            return None
-
-    def select_node(self):
-        while True:
-            print("\n---FLOODING SIMULATION---")
-            nodes = ["A", "B", "C"]
-            for i, node in enumerate(nodes):
-                print(f"{i+1}. Node {node}")
-
-            try:
-                node_index = int(input("Ingrese el número del nodo: "))
-                if node_index > 0 and node_index <= len(nodes):
-                    return nodes[node_index - 1]
+                node = await aioconsole.ainput("Ingrese el número del nodo: ")
+                node = int(node)
+                if node > 0 and node <= len(nodes):
+                    if self.graph == keys[node-1]:
+                        print("--> No puede enviar un mensaje a sí mismo.\n")
+                        continue
+                    else:
+                        node_name = keys[node-1]
+                        break
                 else:
                     print("Ingrese un número válido")
 
             except ValueError:
                 print("Ingrese un número válido")
 
-flooding_sim = FloodingSimulation()
+        user_input = await aioconsole.ainput("Mensaje: ")                                 # Obtener el mensaje a enviar
+        
+        for node in self.keys:
+            vecinos = self.getNeighbors(node)
+
+            for vecino in vecinos:
+
+                if (vecino not in self.visited_nodes):
+
+                    self.visited_nodes = self.visited_nodes + [vecino]                       # Agregar el nodo actual a la lista de nodos visitados
+
+                    tabla = {
+                    "type": "message",
+                    "headers": {
+                        "from": self.graph,
+                        "to": node_name,
+                        "visited": self.visited_nodes
+                    },
+                    "payload": user_input
+                    }
+            
+                    tabla_send = json.dumps(tabla)                                           # Se envía el paquete de información
+                    recipient_jid = vecino                                                   # Obtener el JID del destinatario
+
+                    self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')     # Enviar mensaje con librería slixmpp
+                    print(f"--> Mensaje enviado a {vecino}.")
+                    print("----------------------")
+            
+    #-------------------------------------------------------------------------------------------------------------------
+    def getAvailableNodes(self):
+        with open('names.txt', 'r') as file:
+            data = json.load(file)
+        
+        data = data["config"]
+        return data
+
+    #-------------------------------------------------------------------------------------------------------------------
+    def getNeighbors(self, node):
+        with open('topo.txt', 'r') as file:
+            data = json.load(file)
+
+        data = data["config"]
+        neighbors = list(data[node])
+
+        list_neighbors = []
+        for n in neighbors:
+            list_neighbors.append(self.keys[n])
+
+        return list_neighbors
+    
+    #-------------------------------------------------------------------------------------------------------------------
+    async def convert_to_dict(self, paquete):
+        try:
+            input_str = paquete.replace("'", '"')
+            data = json.loads(input_str)
+            return data
+        except json.JSONDecodeError as err:
+            print(err)
+            return None
+    
+     #-------------------------------------------------------------------------------------------------------------------
+    
+    '''
+    message: Función que se ejecuta de forma asincrónica al recibir un mensaje.
+    '''
+    async def message(self, msg):
+
+        if self.old:
+            return
+        
+        if msg['type'] == 'chat' and "message" in msg['body']:
+            person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
+            info = await self.convert_to_dict(msg['body'])
+
+            mensaje = info["payload"].replace("'", '"')
+            origen = info["headers"]["from"]
+            destino = info["headers"]["to"]
+
+            if destino == self.graph:
+                email_origen = self.keys[origen]
+
+                print("\n\n----------- MENSAJE -----------")
+                print(f"--> {email_origen} ha enviado un mensaje: {mensaje}")
+                print("--------------------------------")
+                return
+            
+    #-------------------------------------------------------------------------------------------------------------------
+    async def mostrar_menu_comunicacion(self):
+        print("\n----- MENÚ DE COMUNICACIÓN -----")
+        print("1) Enviar mensaje")
+        print("2) Salir")
+
+        while True:
+            try:
+                opcion = int(await aioconsole.ainput("Ingrese el número de la opción deseada: "))
+                if opcion in range(1, 10):
+                    return opcion
+                else:
+                    print("\n--> Opción no válida. Por favor, ingrese un número del 1 al 9.\n")
+            except ValueError:
+                print("\n--> Entrada inválida. Por favor, ingrese un número entero.\n")
+
+    #-------------------------------------------------------------------------------------------------------------------
+    async def mostrar_menu_comunicacion(self):
+        print("\n----- MENÚ DE COMUNICACIÓN -----")
+        print("1) Enviar mensaje")
+        print("2) Salir")
+
+        while True:
+            try:
+                opcion = int(await aioconsole.ainput("Ingrese el número de la opción deseada: "))
+                if opcion in range(1, 10):
+                    return opcion
+                else:
+                    print("\n--> Opción no válida. Por favor, ingrese un número del 1 al 9.\n")
+            except ValueError:
+                print("\n--> Entrada inválida. Por favor, ingrese un número entero.\n")
+
+#-------------------------------------------------------------------------------------------------------------------
+def select_node():
+    with open('names.txt', 'r') as file:
+        data = file.read().replace('\n', '').replace("'", '"')
+    data = json.loads(data)
+    data = data["config"]
+
+    while True:
+        print("\n---FLOODING--\nSeleccione un nodo de la lista: ")
+        keys = list(value for key, value in data.items())
+        for i, key in enumerate(keys):
+            print(f"{i+1}. {key}")
+
+        try:
+            node = int(input("Ingrese el número del nodo: "))
+            if node > 0 and node <= len(data):
+                return keys[node-1]
+            else:
+                print("Ingrese un número válido")
+
+        except ValueError:
+            print("Ingrese un número válido")
+
+# Para evitar el error de que el evento no se puede ejecutar en Windows
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  #COMENTAR PARA MAC
+
+usuario = select_node()
+server = Server(usuario, "123")            # Crear instancia del servidor con usuario y contraseña
+server.connect(disable_starttls=True)      # Conexión al servidor
+server.process(forever=False)              # Programa corre hasta que se cierra la conexión
