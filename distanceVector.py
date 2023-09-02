@@ -40,6 +40,12 @@ class BellmanFord():
 
                 if type == "info":          # Receive the routing table
                     self.bellman_ford(incoming_tabla)
+
+                elif type == "link_cost_change":  # Detect a link cost change
+                    # Update the link cost in your topology data
+                    self.topologia[self.graph][incoming_tabla["link"]] = incoming_tabla["new_cost"]
+                    # Trigger Bellman-Ford to recalculate routes
+                    self.bellman_ford({"type": "info", "payload": self.tabla})
                 
                 elif type == "echo":        # Receive an echo
                     self.echo(incoming_tabla)
