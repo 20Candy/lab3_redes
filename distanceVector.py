@@ -94,7 +94,7 @@ class DistanceVector():
                     else:
                         print("\nMensaje recibido. Retransmitiendo...")
 
-                        camino = self.enlaces[self.keys.index(nodo)]
+                        camino = self.enlaces[self.keys.index(header_to)]
                         print(f"*Enviar el siguiente paquete a {camino}...*")
 
                         tabla["headers"]["hop_count"] -= 1
