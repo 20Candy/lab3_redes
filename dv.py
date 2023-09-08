@@ -9,8 +9,6 @@ import aioconsole
 import base64
 import time
 
-
-
 class Server(slixmpp.ClientXMPP):
 
     '''
@@ -37,10 +35,9 @@ class Server(slixmpp.ClientXMPP):
         self.logged_in = False
         self.topologia = None
 
-        self.echo_send = []
-        self.echoed = []
-
         self.traza_mensajes = []
+        self.compartido = []
+
 
     #-------------------------------------------------------------------------------------------------------------------
     '''
@@ -56,23 +53,13 @@ class Server(slixmpp.ClientXMPP):
             self.old = False
             self.tabla = await self.tabla_enrutamiento()             # Generar tabla de enrutamiento
 
-            print("\n\n----- NOTIFICACION: ECHO -----")
+            print("\n\n----- NOTIFICACION: COMPARTIENDO VECTOR DISTANCIA -----")
 
-            #-----> Enviar a vecinos echo
+            #-----> Enviar a vecinos vector inicial
             for key in self.topologia[self.graph]:
 
                 if key != self.graph:
-                    tabla = {"type":"echo", 
-                    "headers": {"from": f"{self.graph}", "to": f"{key}", "hop_count": 1},
-                    "payload": "ping"}
-                    
-                    tabla_send = json.dumps(tabla)
-                    email_destino = self.keys[key]
-
-                    print(f"\n--> Enviando echo a {email_destino}...")
-
-                    self.echo_send.append(email_destino)
-                    self.send_message(mto=email_destino, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
+                    await self.broadcast_table(key)       # Enviar mensaje con librería slixmpp
             
             print("--------------------------------")
 
@@ -85,7 +72,7 @@ class Server(slixmpp.ClientXMPP):
         except Exception as e:
             print(f"Error: {e}")
 
-
+    
     #-------------------------------------------------------------------------------------------------------------------
     '''
     xmpp_menu: Función que muestra el menú de comunicación y ejecuta las funciones correspondientes a cada opción.
@@ -96,26 +83,25 @@ class Server(slixmpp.ClientXMPP):
         await asyncio.sleep(5)
 
         opcion_comunicacion = 0
-        while opcion_comunicacion != 4:
+        while opcion_comunicacion != 3:
 
             opcion_comunicacion = await self.mostrar_menu_comunicacion()
 
             if opcion_comunicacion == 1:
                 # Mostrar tabla de enrutamiento
-                print("\n----- TABLA DE ENRUTAMIENTO -----")
+                print("\n----- VECTOR DISTANCIA -----")
                 print(self.tabla)
+
+                print("\n----- ENLACES -----")
+                print(self.enlaces)
                 await asyncio.sleep(1)
 
             elif opcion_comunicacion == 2:
-                await self.dijkstra()
-                await asyncio.sleep(1)
-
-            elif opcion_comunicacion == 3:
                 # Enviar mensaje a un usuario
                 await self.send_msg_to_user()
                 await asyncio.sleep(1)
 
-            elif opcion_comunicacion == 4:
+            elif opcion_comunicacion == 3:
                 # Cerrar sesión con una cuenta
                 print("\n--> Sesión cerrada. Hasta luego.")
                 self.disconnect()
@@ -162,14 +148,14 @@ class Server(slixmpp.ClientXMPP):
         
         tabla_send = json.dumps(tabla)  # Se envía el paquete de información
         
-        camino = await self.pathfinding(node_name)
-        print(f"\n--> Camino más corto: {camino}")
-        next_node = camino[1]
+        keys_temp = list(self.keys.keys())
+        camino = self.enlaces[keys_temp.index(node_name)]
+        print(f"\n--> Camino más corto a través de: {camino}")
 
-        recipient_jid = self.keys[next_node]                                        # Obtener el JID del destinatario
+        recipient_jid = self.keys[camino]                                        # Obtener el JID del destinatario
 
         self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
-        print(f"--> Mensaje enviado a {next_node}, con destino a {node_name}.")
+        print(f"--> Mensaje enviado a {camino}, con destino a {node_name}.")
         print("----------------------")
 
     #-------------------------------------------------------------------------------------------------------------------
@@ -178,74 +164,54 @@ class Server(slixmpp.ClientXMPP):
     '''
 
     async def message(self, msg):
+        print("\n\n---------- MENSAJES / NOTIFICACIONES ----------")
 
         if self.old:
             return
         
-        if msg['type'] == 'chat' and "echo" in msg['body']:
-            person = msg['from'].bare                                               # Si se recibe un echo, se obtiene el nombre de usuario
+        if msg['type'] == 'chat' and "info" in msg['body']:
 
-            mensaje_recibido = await self.convert_to_dict(msg['body'].replace("'", '"'))
-            hop_count = mensaje_recibido["headers"]["hop_count"]
-
-            if hop_count == 1:
-
-                self.echoed.append(person)
-                node_name = ""
-                for key, value in self.keys.items():
-                    if value == person:
-                        node_name = key
-
-                tabla = {"type":"echo", 
-                    "headers": {"from": f"{self.graph}", "to": f"{node_name}", "hop_count": 2},
-                    "payload": "ping"}
-                
-                tabla_send = json.dumps(tabla)                    
-                self.send_message(mto=person, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
-
-                self.echo_send.append(person)
-                self.echoed.append(person)
-
-                self.echo_send = list(set(self.echo_send))
-                self.echoed = list(set(self.echoed))
-
-                print(f"\n--> {person} ha hecho echo. Haciendo echo de vuelta.")
-                await self.broadcast_table(person)
-
-            elif hop_count == 2:
-                self.echoed.append(person)
-                self.echoed = list(set(self.echoed))
-
-                print(f"\n--> {person} ha hecho echo de vuelta.")
-                await self.broadcast_table(person)
-
-        elif msg['type'] == 'chat' and "info" in msg['body']:
-            
-            person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
+            # BELLMAN FORD - DISTANCE VECTOR
             info = await self.convert_to_dict(msg['body'])
 
             mensaje = info["payload"].replace("'", '"')
-            tabla_recibida = json.loads(mensaje)
-            original_tabla = self.tabla
+            received_table = json.loads(mensaje)
+            origin = info["headers"]["from"]
 
-            equal = await self.are_nested_arrays_equal(self.tabla, tabla_recibida)
+            print(f"\n--> Vector de distancia recibido de {origin}.")
 
-            if not equal:
-                print(f"\n--> {person} ha enviado una tabla de enrutamiento. Actualizando...")
+            keys_temp = list(self.keys.keys())
 
-                # Actualizar original_tabla con los valores de tabla
-                for i in range(len(tabla_recibida)):
-                    for j in range(len(tabla_recibida[i])):
-                        if original_tabla[i][j] == 9999:
-                            original_tabla[i][j] = tabla_recibida[i][j]
+            # Costo del nodo actual al nodo origen
+            cost_to_origin = self.tabla[keys_temp.index(origin)]
+            updates_occurred = False
 
-                self.tabla = original_tabla
-                for nodo in self.echoed:
-                    await self.broadcast_table(nodo)
-                    await asyncio.sleep(1)
+            # Revisa con Bellman-Ford si el costo total es menor al costo actual
+            for i, new_cost in enumerate(received_table):
+                total_cost = cost_to_origin + new_cost
+
+                if total_cost < self.tabla[i]:
+                    self.tabla[i] = total_cost
+                    self.enlaces[i] = origin
+                    updates_occurred = True
+
+            # Comparte las tablas de enrutamiento que tiene que compartir
+            if updates_occurred:
+                print("--> Se han realizado cambios en la tabla de enrutamiento.")
+
+                vecinos = self.topologia[self.graph]
+
+                for key in vecinos:
+                    if key != self.graph:
+                        await self.broadcast_table(key)
+                        await asyncio.sleep(1)
+
+            elif not updates_occurred and info["headers"]["hop_count"] == 2:
+                print("--> No se han realizado cambios en la tabla de enrutamiento.")
 
             else:
-                print(f"\n--> {person} ha enviado una tabla de enrutamiento. No hay cambios.")
+                print("--> No se han realizado cambios en la tabla de enrutamiento. Enviando tabla de regreso.")
+                await self.broadcast_table(origin, hop_count=2)
 
         elif msg['type'] == 'chat' and "message" in msg['body']:
             person = msg['from'].bare                                               # Si se recibe un mensaje, se obtiene el nombre de usuario
@@ -264,10 +230,12 @@ class Server(slixmpp.ClientXMPP):
                 return
             
             else:
-                camino = await self.pathfinding(destino)
-                next_node = camino[1]
+                keys_temp = list(self.keys.keys())
 
-                recipient_jid = self.keys[next_node]                                        # Obtener el JID del destinatario
+                camino = self.enlaces[keys_temp.index(destino)]
+                print(f"\n--> Camino más corto a través de: {camino}")
+
+                recipient_jid = self.keys[camino]                                        # Obtener el JID del destinatario
                 tabla = {"type":"message",
                         "headers": {"from": f"{origen}", "to": f"{destino}", "hop_count": 1},
                         "payload": mensaje}
@@ -277,7 +245,7 @@ class Server(slixmpp.ClientXMPP):
                 self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
 
                 print("\n\n----------- MENSAJE -----------")
-                print(f"--> {person} ha enviado un mensaje para retransmitir a {next_node}, con destino a {destino}.")
+                print(f"--> {person} ha enviado un mensaje para retransmitir a {camino}, con destino a {destino}.")
                 print("--------------------------------")
 
         self.traza_mensajes.append(msg)
@@ -285,10 +253,9 @@ class Server(slixmpp.ClientXMPP):
     #-------------------------------------------------------------------------------------------------------------------
     async def mostrar_menu_comunicacion(self):
         print("\n----- MENÚ DE COMUNICACIÓN -----")
-        print("1) Revisar tabla enrutamiento")
-        print("2) Calcular rutas más cortas (Dijkstra)")
-        print("3) Enviar mensaje")
-        print("4) Salir")
+        print("1) Revisar vector distancia")
+        print("2) Enviar mensaje")
+        print("3) Salir")
 
         while True:
             try:
@@ -320,119 +287,49 @@ class Server(slixmpp.ClientXMPP):
         data = json.loads(data)
         self.keys = data["config"]
 
-        # Se genera la tabla de enrutamiento
-        array_topologia = [[9999 for i in range(len(self.keys))] for j in range(len(self.keys))]
-
-        # Buscar llave de correo actual
+        self.graph = None
         for key, value in self.keys.items():
             if value == self.email:
                 self.graph = key
 
+        array_topologia = [9999 for _ in range(len(self.keys))]
+        self.enlaces = ["" for _ in range(len(self.keys))]
+
         keys_temp = list(self.keys.keys())
 
-        # Llenar tabla de enrutamiento inicial
         for key in self.topologia[self.graph]:
-            array_topologia[keys_temp.index(self.graph)][keys_temp.index(key)] = 1
+                array_topologia[keys_temp.index(key)] = 1
+                self.enlaces[keys_temp.index(key)] = key
 
-        if array_topologia[keys_temp.index(self.graph)][keys_temp.index(self.graph)] == 9999:
-            array_topologia[keys_temp.index(self.graph)][keys_temp.index(self.graph)] = 0
+        if array_topologia[keys_temp.index(self.graph)] == 9999:
+            array_topologia[keys_temp.index(self.graph)] = 0
 
-        print(f"\nTABLA DE ENRUTAMIENTO INICIAL:\n {array_topologia}")
+
+        print(f"\nVECTOR DE DISTANCIA INICIAL:\n {array_topologia}")
 
         return array_topologia
 
     '''
-        Le envia a sus vecinos su tabla de enrutamiento por broadcast
+        Le envia a sus vecinos su vector de distancia por broadcast
     '''
-    async def broadcast_table(self, element=None):
+    async def broadcast_table(self, element=None, hop_count=1):
 
         # Imprime las tablas de enrutamiento que tiene que compartir   
 
         # Nodo seleccionado
-        nodo_name = ""
-        for key, value in self.keys.items():
-            if value == element:
-                nodo_name = key
+        nodo_email = self.keys[element]
 
         # Se crea el primer paquete de información
         string_array = str(self.tabla)
         tabla = {"type":"info", 
-            "headers": {"from": f"{self.graph}", "to": f"{nodo_name}", "hop_count": 1},
+            "headers": {"from": f"{self.graph}", "to": f"{element}", "hop_count": hop_count},
             "payload": string_array}
         
         tabla_send = json.dumps(tabla)  # Se envía el paquete de información
     
         print(f"--> Enviando tabla a {element}...")
 
-        self.send_message(mto=element, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
-
-    '''
-        Después de haber calculado las distancias más cortas, se genera el camino más corto
-    '''
-    async def pathfinding(self, destino):
-        camino_actual = []
-        keys = list(self.keys.keys())
-        
-        current = 0
-        for i in range(len(keys)):
-            if keys[i] == destino:
-                current = i
-
-        while current != -1:
-            camino_actual.insert(0, current)
-            current = self.enlaces[current]
-
-        camino_nombres = []
-
-        for i in camino_actual:
-            camino_nombres.append(keys[i])
-
-        return camino_nombres
-
-    '''
-        Recibe información de las tablas de enrutamiento y las actualiza. 
-            - Si las tablas ya están llenas, con Dijkstra calcula las distancias más cortas.
-    '''
-    async def dijkstra(self):
-        print("\n-----------  DIJKSTRA  -----------")
-        print(f"TABLA ACTUAL: {self.tabla}")
-
-        inicio = 0
-        keys = list(self.keys.keys())
-        for i in range(len(keys)):
-            if keys[i] == self.graph:
-                inicio = i
-
-        cant_nodos = len(self.tabla)
-        visitado = [False for _ in range(cant_nodos)]
-        costo_enlace = [float('inf') for _ in range(cant_nodos)]
-        enlace = [-1 for _ in range(cant_nodos)]
-        costo_enlace[inicio] = 0
-
-        for _ in range(cant_nodos):
-            min_distance = float('inf')
-            min_node = -1
-
-            for node in range(cant_nodos):
-                if not visitado[node] and costo_enlace[node] < min_distance:
-                    min_distance = costo_enlace[node]
-                    min_node = node
-
-            if min_node == -1:
-                break
-
-            visitado[min_node] = True
-
-            for neighbor in range(cant_nodos):
-                if (not visitado[neighbor] and
-                        self.tabla[min_node][neighbor] > 0 and
-                        costo_enlace[min_node] + self.tabla[min_node][neighbor] < costo_enlace[neighbor]):
-                    costo_enlace[neighbor] = costo_enlace[min_node] + self.tabla[min_node][neighbor]
-                    enlace[neighbor] = min_node
-
-        self.enlaces = enlace
-        self.costo_enlaces = costo_enlace
-        print("---------------------------")
+        self.send_message(mto=nodo_email, mbody=tabla_send, mtype='chat')         # Enviar mensaje con librería slixmpp
 
 # ------------ MENUS y HERRAMIENTAS ------------
     async def convert_to_dict(self, paquete):
@@ -458,6 +355,7 @@ class Server(slixmpp.ClientXMPP):
         
         return True
 
+
 def select_node():
     with open('names.txt', 'r') as file:
         data = file.read().replace('\n', '').replace("'", '"')
@@ -465,7 +363,7 @@ def select_node():
     data = data["config"]
 
     while True:
-        print("\n---DIJKSTRA---\nSeleccione un nodo de la lista: ")
+        print("\n---DISTANCE VECTOR---\nSeleccione un nodo de la lista: ")
         keys = list(value for key, value in data.items())
         for i, key in enumerate(keys):
             print(f"{i+1}. {key}")
