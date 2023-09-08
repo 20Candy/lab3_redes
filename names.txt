@@ -1,4 +1,15 @@
 {
     "type":"names",
-    "config": {"A": "alfa@alumchat.xyz", "B": "betta@alumchat.xyz", "C": "charlie@alumchat.xyz"}
+    "config": 
+    {
+        "A": "alfa@alumchat.xyz", 
+        "B": "betta@alumchat.xyz", 
+        "C": "charlie@alumchat.xyz",
+        "D": "delta@alumchat.xyz",
+        "E": "epsilon@alumchat.xyz",
+        "F": "fi@alumchat.xyz",
+        "G": "go@alumchat.xyz",
+        "H": "hi@alumchat.xyz",
+        "I": "iuvg@alumchat.xyz"
+    }
 }
