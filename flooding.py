@@ -242,6 +242,7 @@ class Server(slixmpp.ClientXMPP):
                 tabla_send = json.dumps(tabla)
 
                 print("\n\n----- RETRANSMITIENDO MENSAJE -----")
+                retransmitir = True
                 
                 vecinos = self.getNeighbors(self.graph)
                 for vecino in vecinos:
@@ -259,7 +260,12 @@ class Server(slixmpp.ClientXMPP):
                         self.send_message(mto=recipient_jid, mbody=tabla_send, mtype='chat')     # Enviar mensaje con librería slixmpp
                         print(f"--> Retransmitiendo mensaje a {vecino}.")
                         print("-----------------------------------")
+                        retransmitir = False
                         await asyncio.sleep(1)
+
+                if retransmitir:
+                    print("--> No hay nodos a los que retransmitir el mensaje.")
+                    print("------------------------------------------------------")
             
     #-------------------------------------------------------------------------------------------------------------------
     async def mostrar_menu_comunicacion(self):
