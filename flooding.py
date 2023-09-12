@@ -42,21 +42,21 @@ class Server(slixmpp.ClientXMPP):
     '''
 
     async def start(self, event):
-        # try:
-        self.send_presence()                                            # Enviar presencia  
-        self.get_roster()                                               # Obtener roster   
+        try:
+            self.send_presence()                                            # Enviar presencia  
+            self.get_roster()                                               # Obtener roster   
 
-        await asyncio.sleep(2)
-        self.old = False
+            await asyncio.sleep(2)
+            self.old = False
+            
+            #-----> Generado por ChatGPT
+            xmpp_menu_task = asyncio.create_task(self.xmpp_menu())          # Creación de hilo para manejar el menú de comunicación
+            #---------------------------
         
-        #-----> Generado por ChatGPT
-        xmpp_menu_task = asyncio.create_task(self.xmpp_menu())          # Creación de hilo para manejar el menú de comunicación
-        #---------------------------
-        
-        await xmpp_menu_task            
+            await xmpp_menu_task            
 
-        # except Exception as e:
-        #     print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
 
     #-------------------------------------------------------------------------------------------------------------------
     '''
